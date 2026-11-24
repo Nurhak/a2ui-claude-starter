@@ -1,0 +1,52 @@
+// Canned replies used when no ANTHROPIC_API_KEY is set.
+// They are written in A2UI Express, exactly as the model would write them,
+// and go through the same streaming parser and validation as a live reply.
+
+import type {ApplyResult} from './home.js';
+
+export const STUB_NOTICE = '(Stub mode: no model was called. Set ANTHROPIC_API_KEY to use Claude.)';
+
+export function stubSceneReply(): string {
+  return `Here's a movie night scene for the living room. Tweak it, then press Apply.
+<a2ui>
+surface("scene")
+$/scene = {name: "Movie night", room: "living room", brightness: 20, color: ["warm"], tv: true, blinds: true}
+root = Card(body)
+body = Column([title, hint, dim, color, tvBox, blindsBox, actions])
+title = Text("**Movie night**")
+hint = Text("Living room. Nothing changes until you press Apply.", "caption")
+dim = Slider("Brightness", 0, 100, $/scene/brightness)
+color = ChoicePicker("Light color", "mutuallyExclusive", [{label: "Warm", value: "warm"}, {label: "Neutral", value: "neutral"}, {label: "Cool", value: "cool"}], $/scene/color, "chips")
+tvBox = CheckBox("Turn on the TV", $/scene/tv)
+blindsBox = CheckBox("Close the blinds", $/scene/blinds)
+actions = Row([cancel, apply], "end")
+cancel = Button(cancelLabel, "borderless", Event("cancel_scene"))
+cancelLabel = Text("Cancel")
+apply = Button(applyLabel, "primary", Event("apply_scene", {scene: $/scene}))
+applyLabel = Text("Apply scene")
+</a2ui>`;
+}
+
+export function stubAppliedReply(result: ApplyResult): string {
+  const items = result.changes.map(c => JSON.stringify(c)).join(', ');
+  return `Done. Your scene is on.
+<a2ui>
+surface("result")
+$/changes = [${items}]
+root = Card(body)
+body = Column([title, list])
+title = Text("**Scene applied** in the ${result.room}")
+list = List(_template($/changes, item))
+item = Text($)
+</a2ui>`;
+}
+
+export function stubCancelledReply(): string {
+  return 'Okay, nothing changed.';
+}
+
+export function chunk(text: string, size = 80): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
+  return out;
+}
