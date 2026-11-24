@@ -78,6 +78,10 @@ claude mcp add -s user a2ui-scene \
   -- /path/to/a2ui-claude-starter/node_modules/.bin/tsx /path/to/a2ui-claude-starter/server/mcp.ts
 ```
 
+If your token lives in a password manager, set `HA_TOKEN_COMMAND` (for example
+`op read op://Home/HA/token`) instead of `HA_TOKEN`: the server runs it on the first tool
+call, so a slow lookup doesn't hold up Claude's MCP startup.
+
 Or run it by hand with `npm run mcp` (stdio). Claude asks before each tool call unless
 you allow it, which plays the role of the Apply button here.
 

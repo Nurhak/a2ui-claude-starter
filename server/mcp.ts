@@ -3,6 +3,8 @@
 // Run with `npm run mcp` (stdio). Devices follow the same HA_* settings as the agent.
 import {McpServer, fromJsonSchema} from '@modelcontextprotocol/server';
 import {StdioServerTransport} from '@modelcontextprotocol/server/stdio';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {applyScene, haConfig} from './home.js';
 
 interface Scene {
@@ -10,6 +12,19 @@ interface Scene {
   color?: 'warm' | 'neutral' | 'cool';
   tv?: boolean;
   blinds?: boolean;
+}
+
+// HA_TOKEN_COMMAND (e.g. `op read op://Home/HA/token`) fetches the token on first use instead
+// of at start, so a slow password manager can't hold up Claude's MCP startup.
+async function ensureToken() {
+  const cmd = process.env.HA_TOKEN_COMMAND;
+  if (process.env.HA_TOKEN || !cmd) return;
+  // A secret lookup can come back empty when another one runs at the same time: retry.
+  for (let attempt = 1; attempt <= 3 && !process.env.HA_TOKEN; attempt++) {
+    const {stdout} = await promisify(execFile)('/bin/sh', ['-c', cmd], {timeout: 60_000});
+    if (stdout.trim()) process.env.HA_TOKEN = stdout.trim();
+  }
+  if (!process.env.HA_TOKEN) throw new Error('HA_TOKEN_COMMAND printed no token');
 }
 
 const server = new McpServer({name: 'a2ui-home-scene', version: '0.1.0'});
@@ -36,6 +51,12 @@ server.registerTool(
     annotations: {destructiveHint: false, idempotentHint: true, openWorldHint: true},
   },
   async ({brightness, color, tv, blinds}) => {
+    try {
+      await ensureToken();
+    } catch (err) {
+      // Don't fall back to the simulated home when a real one was configured.
+      return {content: [{type: 'text', text: `Could not get the Home Assistant token: ${(err as Error).message}`}], isError: true};
+    }
     const result = await applyScene({brightness, color: color ? [color] : undefined, tv, blinds});
     const where = result.target === 'home-assistant' ? 'Home Assistant' : 'the simulated home (HA_URL/HA_TOKEN not set)';
     const lines = result.changes.length ? result.changes.map(c => `- ${c}`).join('\n') : '- nothing to change';
@@ -47,4 +68,5 @@ server.registerTool(
 );
 
 await server.connect(new StdioServerTransport());
-console.error(`a2ui-home-scene MCP ready (devices: ${haConfig() ? 'Home Assistant' : 'simulated'})`);
+const devices = haConfig() ? 'Home Assistant' : process.env.HA_URL && process.env.HA_TOKEN_COMMAND ? 'Home Assistant (token on first use)' : 'simulated';
+console.error(`a2ui-home-scene MCP ready (devices: ${devices})`);
