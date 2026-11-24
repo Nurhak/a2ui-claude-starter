@@ -65,6 +65,22 @@ header shows which mode is active, and so does `GET /api/health` (`devices`).
 Use a token from a Home Assistant user that may only control these devices if you can,
 and keep `.env` out of git (it already is in `.gitignore`).
 
+## Use it from Claude (MCP)
+
+The same home is also a small MCP server with one tool, `apply_scene` (brightness,
+warm/neutral/cool, TV, blinds). Claude Code or Claude Desktop can then set a scene with
+nothing but that tool, instead of full Home Assistant access. It reads the same `HA_*`
+settings and falls back to the simulated home without them.
+
+```bash
+claude mcp add -s user a2ui-scene \
+  -e HA_URL=http://homeassistant.local:8123 -e HA_TOKEN=... -e HA_LIGHT=light.living_room \
+  -- /path/to/a2ui-claude-starter/node_modules/.bin/tsx /path/to/a2ui-claude-starter/server/mcp.ts
+```
+
+Or run it by hand with `npm run mcp` (stdio). Claude asks before each tool call unless
+you allow it, which plays the role of the Apply button here.
+
 ## How it works
 
 ```
@@ -91,6 +107,7 @@ press "Apply scene"   ── action ─▶  applyScene() runs in code, result
 | --- | --- |
 | `server/index.ts` | Express agent: Claude streaming, A2UI parsing, action handling |
 | `server/home.ts` | Applies a scene: Home Assistant when configured, otherwise a simulated home |
+| `server/mcp.ts` | The same `applyScene()` as an MCP server for Claude Code / Claude Desktop |
 | `server/stub.ts` | Canned replies for stub mode |
 | `web/App.tsx` | Chat UI, `MessageProcessor`, `A2uiSurface`, action round-trip |
 
@@ -100,7 +117,7 @@ press "Apply scene"   ── action ─▶  applyScene() runs in code, result
   packages are still 0.x, so expect API changes.
 - Devices are simulated unless you set `HA_URL` and `HA_TOKEN`. The card is fixed to one room's
   lights, TV and blinds; a next step is letting Claude read your Home Assistant entities
-  (for example through its MCP server) and build cards for any device.
+  and build cards for any device.
 - Conversations live in memory and reset when the agent restarts.
 
 ## License
