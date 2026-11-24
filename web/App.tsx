@@ -47,7 +47,11 @@ export function App() {
   useEffect(() => {
     fetch('/api/health')
       .then(r => r.json())
-      .then(h => setMode(h.mode === 'stub' ? 'Stub mode (no API key)' : `Claude · ${h.model}`))
+      .then(h =>
+        setMode(
+          `${h.mode === 'stub' ? 'Stub mode (no API key)' : `Claude · ${h.model}`} · ${h.devices === 'home-assistant' ? 'Home Assistant' : 'simulated devices'}`,
+        ),
+      )
       .catch(() => setMode('Agent offline'));
   }, []);
 
@@ -119,7 +123,7 @@ export function App() {
     <div className="page">
       <header>
         <h1>Claude × A2UI</h1>
-        <p>The agent answers with real UI, not paragraphs. Devices are simulated.</p>
+        <p>The agent answers with real UI, not paragraphs.</p>
         <span className="mode">{mode}</span>
       </header>
 

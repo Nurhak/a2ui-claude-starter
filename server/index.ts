@@ -4,7 +4,7 @@ import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {A2uiGenerator, CatalogConfig} from '@a2ui/agent';
-import {applyScene, type Scene} from './home.js';
+import {applyScene, haConfig, type Scene} from './home.js';
 import {STUB_NOTICE, chunk, stubAppliedReply, stubCancelledReply, stubSceneReply} from './stub.js';
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -23,7 +23,7 @@ const BASIC_CATALOG_ID = 'https://a2ui.org/specification/v1_0/catalogs/basic/cat
 // Our own renderer (the React app in /web) supports the v1.0 basic catalog.
 const rendererCapabilities = {'1.0': {supportedCatalogIds: [BASIC_CATALOG_ID]}};
 
-const SYSTEM = `You are a smart home assistant for one home. Devices are simulated.
+const SYSTEM = `You are a smart home assistant for one home.
 The living room has dimmable lights (brightness 0-100 and a color: warm, neutral or cool), a TV and blinds.
 
 When the user asks to change something, do NOT just describe it in text.
@@ -35,7 +35,7 @@ Reply with one short sentence and ONE A2UI surface the user can adjust and confi
 - Only include controls that matter for the request.
 
 When you receive an apply_scene result, reply with a short confirmation and a small card
-(surface id "result") listing what changed. When the user cancels, reply in one short sentence and no UI.
+(surface id "result") listing what changed. If the result has ok: false or skipped items, say so plainly. When the user cancels, reply in one short sentence and no UI.
 For questions that need no input from the user, answer in plain text.`;
 
 // --- Conversation store (in memory, per browser tab) ------------------------
@@ -53,7 +53,7 @@ const app = express();
 app.use(express.json({limit: '1mb'}));
 
 app.get('/api/health', (_req, res) => {
-  res.json({ok: true, mode: STUB ? 'stub' : 'claude', model: STUB ? null : MODEL});
+  res.json({ok: true, mode: STUB ? 'stub' : 'claude', model: STUB ? null : MODEL, devices: haConfig() ? 'home-assistant' : 'simulated'});
 });
 
 app.post('/api/chat', async (req, res) => {
@@ -74,7 +74,7 @@ app.post('/api/chat', async (req, res) => {
   if (body.action) {
     const {name, context = {}} = body.action;
     if (name === 'apply_scene') {
-      const result = applyScene((context.scene ?? {}) as Scene);
+      const result = await applyScene((context.scene ?? {}) as Scene);
       send({type: 'event', name: 'scene_applied', result});
       userContent = `[UI action: apply_scene] Result: ${JSON.stringify(result)}`;
       stubReply = stubAppliedReply(result);
@@ -117,7 +117,7 @@ app.post('/api/chat', async (req, res) => {
       const llm = anthropic!.messages.stream({
         model: MODEL,
         max_tokens: 4096,
-        system: `${SYSTEM}\n\n${processor.promptSnippet}`,
+        system: `${SYSTEM}\n${haConfig() ? 'Devices are real, controlled through Home Assistant.' : 'Devices are simulated.'}\n\n${processor.promptSnippet}`,
         messages: history,
       });
       for await (const event of llm) {
@@ -141,5 +141,7 @@ app.post('/api/chat', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`A2UI agent on http://localhost:${PORT} (${STUB ? 'stub mode' : `Claude: ${MODEL}`})`);
+  console.log(
+    `A2UI agent on http://localhost:${PORT} (${STUB ? 'stub mode' : `Claude: ${MODEL}`}, devices: ${haConfig() ? 'Home Assistant' : 'simulated'})`,
+  );
 });

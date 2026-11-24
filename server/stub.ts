@@ -29,13 +29,14 @@ applyLabel = Text("Apply scene")
 
 export function stubAppliedReply(result: ApplyResult): string {
   const items = result.changes.map(c => JSON.stringify(c)).join(', ');
-  return `Done. Your scene is on.
+  const all = result.ok && !result.changes.some(c => c.includes(': skipped'));
+  return `${all ? 'Done. Your scene is on.' : 'Some of it did not go through, see below.'}
 <a2ui>
 surface("result")
 $/changes = [${items}]
 root = Card(body)
 body = Column([title, list])
-title = Text("**Scene applied** in the ${result.room}")
+title = Text("**${all ? 'Scene applied' : 'Scene partly applied'}** in the ${result.room}")
 list = List(_template($/changes, item))
 item = Text($)
 </a2ui>`;
