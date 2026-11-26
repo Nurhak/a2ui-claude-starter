@@ -67,10 +67,42 @@ and keep `.env` out of git (it already is in `.gitignore`).
 
 ## Use it from Claude (MCP)
 
-The same home is also a small MCP server with one tool, `apply_scene` (brightness,
-warm/neutral/cool, TV, blinds). Claude Code or Claude Desktop can then set a scene with
-nothing but that tool, instead of full Home Assistant access. It reads the same `HA_*`
-settings and falls back to the simulated home without them.
+The same home is also a small MCP server with two tools. Claude can set a scene with
+nothing but these, instead of full Home Assistant access:
+
+- `show_scene` suggests a scene (name, brightness, warm/neutral/cool, TV, blinds) and
+  changes nothing.
+- `apply_scene` sets the devices.
+
+It reads the same `HA_*` settings and falls back to the simulated home without them.
+
+In Claude Desktop and claude.ai, both tools show the A2UI scene card right in the chat, as
+an [MCP App](https://modelcontextprotocol.io/extensions/apps). It has the same slider,
+color chips, checkboxes and Apply button as the web demo, and Apply calls `apply_scene`. In
+Claude Code (a terminal) you get the text result instead.
+
+Build the card once (and again after changing `web/mcp-app/`), then register the server:
+
+```bash
+npm run build:mcp
+```
+
+Claude Desktop, in `~/Library/Application Support/Claude/claude_desktop_config.json`
+(restart Desktop afterwards):
+
+```json
+{
+  "mcpServers": {
+    "a2ui-scene": {
+      "command": "/path/to/a2ui-claude-starter/node_modules/.bin/tsx",
+      "args": ["/path/to/a2ui-claude-starter/server/mcp.ts"],
+      "env": {"HA_URL": "http://homeassistant.local:8123", "HA_TOKEN": "...", "HA_LIGHT": "light.living_room"}
+    }
+  }
+}
+```
+
+Claude Code:
 
 ```bash
 claude mcp add -s user a2ui-scene \
@@ -82,8 +114,9 @@ If your token lives in a password manager, set `HA_TOKEN_COMMAND` (for example
 `op read op://Home/HA/token`) instead of `HA_TOKEN`: the server runs it on the first tool
 call, so a slow lookup doesn't hold up Claude's MCP startup.
 
-Or run it by hand with `npm run mcp` (stdio). Claude asks before each tool call unless
-you allow it, which plays the role of the Apply button here.
+Or run it by hand with `npm run mcp`, which builds the card and starts the server on
+stdio. Nothing needs to be installed on Home Assistant itself: the server uses its REST
+API with a long-lived token.
 
 ## How it works
 
@@ -111,7 +144,9 @@ press "Apply scene"   ── action ─▶  applyScene() runs in code, result
 | --- | --- |
 | `server/index.ts` | Express agent: Claude streaming, A2UI parsing, action handling |
 | `server/home.ts` | Applies a scene: Home Assistant when configured, otherwise a simulated home |
-| `server/mcp.ts` | The same `applyScene()` as an MCP server for Claude Code / Claude Desktop |
+| `server/mcp.ts` | The same `applyScene()` as an MCP server (`show_scene`, `apply_scene`) for Claude Code / Claude Desktop |
+| `web/mcp-app/` | The scene card as an MCP App view, built to one HTML file by `vite.mcp.config.ts` |
+| `server/a2ui.ts` | A2UI catalog and parser, shared by the agent and the MCP server |
 | `server/stub.ts` | Canned replies for stub mode |
 | `web/App.tsx` | Chat UI, `MessageProcessor`, `A2uiSurface`, action round-trip |
 

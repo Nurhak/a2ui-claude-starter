@@ -18,6 +18,8 @@ const processor = new A2uiGenerator([catalog]).createProcessor({
 
 const cases = {
   scene: stubSceneReply(),
+  // show_scene fills the card with Claude's values; quotes in the name must not break the A2UI.
+  'show_scene': stubSceneReply({name: 'Cozy "reading" time', brightness: 0, color: 'cool', tv: false, blinds: false}),
   applied: stubAppliedReply(await applyScene({brightness: 35, color: ['warm'], tv: true, blinds: false})),
   partial: stubAppliedReply({ok: false, appliedAt: '', room: 'living room', target: 'home-assistant', changes: ['TV on: failed (HTTP 500)']}),
   cancelled: stubCancelledReply(),

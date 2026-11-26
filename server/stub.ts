@@ -4,16 +4,28 @@
 
 import type {ApplyResult} from './home.js';
 
+export interface SceneCard {
+  name?: string;
+  brightness?: number;
+  color?: 'warm' | 'neutral' | 'cool';
+  tv?: boolean;
+  blinds?: boolean;
+}
+const MOVIE_NIGHT: Required<SceneCard> = {name: 'Movie night', brightness: 20, color: 'warm', tv: true, blinds: true};
+
 export const STUB_NOTICE = '(Stub mode: no model was called. Set ANTHROPIC_API_KEY to use Claude.)';
 
-export function stubSceneReply(): string {
-  return `Here's a movie night scene for the living room. Tweak it, then press Apply.
+// Also the MCP App's scene card, filled with the values Claude suggests.
+export function stubSceneReply(scene: SceneCard = MOVIE_NIGHT): string {
+  const {name, brightness, color, tv, blinds} = {...MOVIE_NIGHT, ...scene};
+  const values = JSON.stringify({name, room: 'living room', brightness, color: [color], tv, blinds});
+  return `Here's a ${name.toLowerCase()} scene for the living room. Tweak it, then press Apply.
 <a2ui>
 surface("scene")
-$/scene = {name: "Movie night", room: "living room", brightness: 20, color: ["warm"], tv: true, blinds: true}
+$/scene = ${values}
 root = Card(body)
 body = Column([title, hint, dim, color, tvBox, blindsBox, actions])
-title = Text("**Movie night**")
+title = Text(${JSON.stringify(`**${name}**`)})
 hint = Text("Living room. Nothing changes until you press Apply.", "caption")
 dim = Slider("Brightness", 0, 100, $/scene/brightness)
 color = ChoicePicker("Light color", "mutuallyExclusive", [{label: "Warm", value: "warm"}, {label: "Neutral", value: "neutral"}, {label: "Cool", value: "cool"}], $/scene/color, "chips")

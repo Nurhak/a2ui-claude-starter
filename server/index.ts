@@ -1,9 +1,7 @@
 import express from 'express';
 import Anthropic from '@anthropic-ai/sdk';
-import {dirname, join} from 'node:path';
-import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
-import {A2uiGenerator, CatalogConfig} from '@a2ui/agent';
+import {generator, rendererCapabilities} from './a2ui.js';
 import {applyScene, haConfig, type Scene} from './home.js';
 import {STUB_NOTICE, chunk, stubAppliedReply, stubCancelledReply, stubSceneReply} from './stub.js';
 
@@ -11,17 +9,6 @@ const PORT = Number(process.env.PORT ?? 8787);
 const MODEL = process.env.MODEL ?? 'claude-sonnet-5-5';
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 const STUB = process.env.STUB === '1' || !API_KEY;
-
-// --- A2UI setup (once, at startup) -----------------------------------------
-// The v1.0 basic catalog ships inside @a2ui/web_core.
-const webCoreSrc = dirname(fileURLToPath(import.meta.resolve('@a2ui/web_core')));
-const CATALOG_PATH = join(webCoreSrc, 'v1_0/schemas/catalogs/basic/catalog.json');
-const catalog = CatalogConfig.fromPath(CATALOG_PATH);
-const generator = new A2uiGenerator([catalog]);
-const BASIC_CATALOG_ID = 'https://a2ui.org/specification/v1_0/catalogs/basic/catalog.json';
-
-// Our own renderer (the React app in /web) supports the v1.0 basic catalog.
-const rendererCapabilities = {'1.0': {supportedCatalogIds: [BASIC_CATALOG_ID]}};
 
 const SYSTEM = `You are a smart home assistant for one home.
 The living room has dimmable lights (brightness 0-100 and a color: warm, neutral or cool), a TV and blinds.
