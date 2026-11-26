@@ -1,0 +1,24 @@
+name: A2UI Scene MCP
+version: "0.3.1"
+slug: a2ui_scene
+description: The living room scene card for Claude chats (MCP App over Streamable HTTP)
+url: https://github.com/Nurhak/a2ui-claude-starter
+arch: [aarch64, amd64]
+init: false
+startup: application
+boot: auto
+homeassistant_api: true
+ports:
+  8790/tcp: 8790
+ports_description:
+  8790/tcp: MCP over HTTP (put it behind HTTPS, e.g. a Cloudflare tunnel)
+options:
+  light: light.living_room
+  tv: ""
+  blinds: ""
+  path_secret: ""
+schema:
+  light: str
+  tv: str?
+  blinds: str?
+  path_secret: password

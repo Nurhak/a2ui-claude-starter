@@ -2,10 +2,13 @@
 // a scene through narrow tools instead of full Home Assistant access.
 // In hosts that support MCP Apps (Claude Desktop, claude.ai) both tools also render the
 // A2UI scene card from web/mcp-app inside the chat; elsewhere they return plain text.
-// Run with `npm run mcp` (stdio). Devices follow the same HA_* settings as the agent.
-import {McpServer, fromJsonSchema} from '@modelcontextprotocol/server';
+// Run with `npm run mcp` (stdio), or set MCP_HTTP_PORT to serve Streamable HTTP on MCP_PATH
+// (how the Home Assistant add-on in ha-addon/ runs it). Devices follow the same HA_* settings.
+import {McpServer, createMcpHandler, fromJsonSchema} from '@modelcontextprotocol/server';
 import {StdioServerTransport} from '@modelcontextprotocol/server/stdio';
 import {execFile} from 'node:child_process';
+import {createServer} from 'node:http';
+import {Readable} from 'node:stream';
 import {readFile} from 'node:fs/promises';
 import {promisify} from 'node:util';
 import {toMessages} from './a2ui.js';
@@ -36,8 +39,6 @@ async function ensureToken() {
   if (!process.env.HA_TOKEN) throw new Error('HA_TOKEN_COMMAND printed no token');
 }
 
-const server = new McpServer({name: 'a2ui-home-scene', version: '0.2.0'});
-
 const sceneProperties = {
   brightness: {type: 'integer', minimum: 0, maximum: 100, description: 'Light brightness in percent; 0 turns the lights off'},
   color: {type: 'string', enum: ['warm', 'neutral', 'cool'], description: 'White tone of the lights'},
@@ -45,63 +46,98 @@ const sceneProperties = {
   blinds: {type: 'boolean', description: 'true closes the blinds, false opens them'},
 } as const;
 
-server.registerResource('Living room scene card', UI_URI, {mimeType: UI_MIME}, async () => ({
-  contents: [{uri: UI_URI, mimeType: UI_MIME, text: await readFile(UI_FILE, 'utf8')}],
-}));
+function buildServer() {
+  const server = new McpServer({name: 'a2ui-home-scene', version: '0.3.0'});
 
-server.registerTool(
-  'show_scene',
-  {
-    title: 'Suggest a living room scene',
-    description:
-      'Show the user an adjustable scene card (brightness slider, warm/neutral/cool, TV, blinds) with Apply and Cancel. ' +
-      'Changes nothing by itself: devices change only when the user presses Apply. Prefer this over apply_scene ' +
-      'when the user asks for a mood ("movie night", "cozy") rather than exact values.',
-    inputSchema: fromJsonSchema<SceneCard>({
-      type: 'object',
-      properties: {name: {type: 'string', maxLength: 40, description: 'Short scene name, e.g. "Movie night"'}, ...sceneProperties},
-      additionalProperties: false,
+  server.registerResource('Living room scene card', UI_URI, {mimeType: UI_MIME}, async () => ({
+    contents: [{uri: UI_URI, mimeType: UI_MIME, text: await readFile(UI_FILE, 'utf8')}],
+  }));
+
+  server.registerTool(
+    'show_scene',
+    {
+      title: 'Suggest a living room scene',
+      description:
+        'Show the user an adjustable scene card (brightness slider, warm/neutral/cool, TV, blinds) with Apply and Cancel. ' +
+        'Changes nothing by itself: devices change only when the user presses Apply. Prefer this over apply_scene ' +
+        'when the user asks for a mood ("movie night", "cozy") rather than exact values.',
+      inputSchema: fromJsonSchema<SceneCard>({
+        type: 'object',
+        properties: {name: {type: 'string', maxLength: 40, description: 'Short scene name, e.g. "Movie night"'}, ...sceneProperties},
+        additionalProperties: false,
+      }),
+      annotations: {readOnlyHint: true},
+      _meta: {ui: {resourceUri: UI_URI}},
+    },
+    async scene => ({
+      content: [{type: 'text', text: `Showing the "${scene.name ?? 'Movie night'}" scene card. Nothing changes until the user presses Apply.`}],
+      structuredContent: {messages: toMessages(stubSceneReply(scene))},
     }),
-    annotations: {readOnlyHint: true},
-    _meta: {ui: {resourceUri: UI_URI}},
-  },
-  async scene => ({
-    content: [{type: 'text', text: `Showing the "${scene.name ?? 'Movie night'}" scene card. Nothing changes until the user presses Apply.`}],
-    structuredContent: {messages: toMessages(stubSceneReply(scene))},
-  }),
-);
+  );
 
-server.registerTool(
-  'apply_scene',
-  {
-    title: 'Apply a living room scene',
-    description:
-      'Set the living room lights (brightness, warm/neutral/cool white), TV and blinds in one go. ' +
-      'Only pass what should change. Returns what was applied, skipped or failed.',
-    // Plain JSON Schema: the project's zod (3.x, used by A2UI) is older than the SDK wants.
-    // applyScene() checks every value again, so nothing unchecked reaches Home Assistant.
-    inputSchema: fromJsonSchema<Scene>({type: 'object', properties: sceneProperties, additionalProperties: false}),
-    annotations: {destructiveHint: false, idempotentHint: true, openWorldHint: true},
-    _meta: {ui: {resourceUri: UI_URI}},
-  },
-  async ({brightness, color, tv, blinds}) => {
-    try {
-      await ensureToken();
-    } catch (err) {
-      // Don't fall back to the simulated home when a real one was configured.
-      return {content: [{type: 'text', text: `Could not get the Home Assistant token: ${(err as Error).message}`}], isError: true};
-    }
-    const result = await applyScene({brightness, color: color ? [color] : undefined, tv, blinds});
-    const where = result.target === 'home-assistant' ? 'Home Assistant' : 'the simulated home (HA_URL/HA_TOKEN not set)';
-    const lines = result.changes.length ? result.changes.map(c => `- ${c}`).join('\n') : '- nothing to change';
-    return {
-      content: [{type: 'text', text: `Applied to ${where}:\n${lines}`}],
-      structuredContent: {messages: toMessages(stubAppliedReply(result))},
-      isError: !result.ok,
-    };
-  },
-);
+  server.registerTool(
+    'apply_scene',
+    {
+      title: 'Apply a living room scene',
+      description:
+        'Set the living room lights (brightness, warm/neutral/cool white), TV and blinds in one go. ' +
+        'Only pass what should change. Returns what was applied, skipped or failed.',
+      // Plain JSON Schema: the project's zod (3.x, used by A2UI) is older than the SDK wants.
+      // applyScene() checks every value again, so nothing unchecked reaches Home Assistant.
+      inputSchema: fromJsonSchema<Scene>({type: 'object', properties: sceneProperties, additionalProperties: false}),
+      annotations: {destructiveHint: false, idempotentHint: true, openWorldHint: true},
+      _meta: {ui: {resourceUri: UI_URI}},
+    },
+    async ({brightness, color, tv, blinds}) => {
+      try {
+        await ensureToken();
+      } catch (err) {
+        // Don't fall back to the simulated home when a real one was configured.
+        return {content: [{type: 'text', text: `Could not get the Home Assistant token: ${(err as Error).message}`}], isError: true};
+      }
+      const result = await applyScene({brightness, color: color ? [color] : undefined, tv, blinds});
+      const where = result.target === 'home-assistant' ? 'Home Assistant' : 'the simulated home (HA_URL/HA_TOKEN not set)';
+      const lines = result.changes.length ? result.changes.map(c => `- ${c}`).join('\n') : '- nothing to change';
+      return {
+        content: [{type: 'text', text: `Applied to ${where}:\n${lines}`}],
+        structuredContent: {messages: toMessages(stubAppliedReply(result))},
+        isError: !result.ok,
+      };
+    },
+  );
 
-await server.connect(new StdioServerTransport());
+  return server;
+}
+
 const devices = haConfig() ? 'Home Assistant' : process.env.HA_URL && process.env.HA_TOKEN_COMMAND ? 'Home Assistant (token on first use)' : 'simulated';
-console.error(`a2ui-home-scene MCP ready (devices: ${devices})`);
+const port = Number(process.env.MCP_HTTP_PORT);
+if (port) {
+  // Streamable HTTP, a fresh server per request. Anyone who knows MCP_PATH can use the tools,
+  // so make it long and random when the port is reachable from outside.
+  const path = process.env.MCP_PATH ?? '/mcp';
+  const handler = createMcpHandler(buildServer);
+  createServer(async (req, res) => {
+    if (new URL(req.url ?? '/', 'http://x').pathname !== path) return void res.writeHead(404).end();
+    try {
+      const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
+      const response = await handler.fetch(
+        new Request(`http://localhost${req.url}`, {
+          method: req.method,
+          headers: Object.entries(req.headers).flatMap(([k, v]) => (v === undefined ? [] : [[k, String(v)]])) as [string, string][],
+          body: hasBody ? (Readable.toWeb(req) as ReadableStream) : undefined,
+          duplex: 'half',
+        } as RequestInit),
+      );
+      res.writeHead(response.status, Object.fromEntries(response.headers));
+      if (response.body) Readable.fromWeb(response.body as never).pipe(res);
+      else res.end();
+    } catch (err) {
+      console.error('MCP request failed:', err);
+      if (!res.headersSent) res.writeHead(500);
+      res.end();
+    }
+  }).listen(port, () => console.error(`a2ui-home-scene MCP on HTTP port ${port} (devices: ${devices})`));
+} else {
+  await buildServer().connect(new StdioServerTransport());
+  console.error(`a2ui-home-scene MCP ready (devices: ${devices})`);
+}
